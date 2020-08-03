@@ -11,11 +11,8 @@ class AnalogButton{
 
     AnalogButton();
     AnalogButton(uint_fast16_t workingVaule, uint_fast8_t tollerance);
-    uint8_t buttonMinValue();
-    uint8_t buttonMaxValue();
+    uint16_t buttonMinValue();
+    uint16_t buttonMaxValue();
         
-    
-
-
 };
 #endif
