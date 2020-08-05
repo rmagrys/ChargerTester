@@ -60,7 +60,6 @@ uint8_t selectCPMode = 0;
 uint8_t selectPPMode = 0;
 
 void displayResults();
-boolean anyErrorButtonPressed();
 void setOutputValues();
 String mapCPValueAsModeName(uint8_t value);
 String mapPPValueAsModeName(uint8_t value);
@@ -75,8 +74,11 @@ void setup()
   pinMode(CAR, OUTPUT);
   pinMode(CHARGE, OUTPUT);
   pinMode(CHARGECOOL, OUTPUT);
+
+  pinMode(PP_6, OUTPUT);
   pinMode(PP_20, OUTPUT);
   pinMode(PP_16, OUTPUT);
+  pinMode(PP_32, OUTPUT);
 
   Wire.begin();
   Serial.begin(115200);
@@ -122,7 +124,6 @@ void loop()
     buttonFunctionOccured = false;
   }
 
-  Serial.println(digitalRead(errorButton1));
 
   if (digitalRead(errorButton1) == HIGH && !errorButton1Pressed)
   {
@@ -163,16 +164,6 @@ void loop()
     countdownTime = millis();
     if (countdownTime - pressedButtonTime > timeToHoldButton && !buttonFunctionOccured)
     {
-      selectPPMode++;
-      displayResults();
-      buttonFunctionOccured = true;
-    }
-  }
-  else if (isAnalogButtonPressed(analogButton2, readedButtonValue) && anyButtonPressed)
-  {
-    countdownTime = millis();
-    if (countdownTime - pressedButtonTime > timeToHoldButton && !buttonFunctionOccured)
-    {
       if (selectPPMode > 0)
       {
         selectPPMode--;
@@ -185,27 +176,41 @@ void loop()
       buttonFunctionOccured = true;
     }
   }
-  else if (isAnalogButtonPressed(analogButton3, readedButtonValue) && anyButtonPressed)
+  else if (isAnalogButtonPressed(analogButton2, readedButtonValue) && anyButtonPressed)
   {
     countdownTime = millis();
     if (countdownTime - pressedButtonTime > timeToHoldButton && !buttonFunctionOccured)
     {
-      selectCPMode++;
+      if(selectPPMode < 4){
+      selectPPMode++;
+      }
       displayResults();
       buttonFunctionOccured = true;
     }
   }
-  else if (isAnalogButtonPressed(analogButton4, readedButtonValue) && anyButtonPressed)
+  else if (isAnalogButtonPressed(analogButton3, readedButtonValue) && anyButtonPressed)
   {
     countdownTime = millis();
     if (countdownTime - pressedButtonTime > timeToHoldButton && !buttonFunctionOccured)
     {
       if (selectCPMode > 0)
       {
-
         selectCPMode--;
       }
       displayResults();
+      buttonFunctionOccured = true;
+  }
+  }
+  else if (isAnalogButtonPressed(analogButton4, readedButtonValue) && anyButtonPressed)
+  {
+    countdownTime = millis();
+    if (countdownTime - pressedButtonTime > timeToHoldButton && !buttonFunctionOccured)
+    {
+      if(selectCPMode < 3){
+        selectCPMode++;
+        }
+        displayResults();
+    
       buttonFunctionOccured = true;
     }
   }
@@ -243,38 +248,38 @@ void loop()
     switch (selectPPMode)
     {
     case 0:
-      analogWrite(PP_6, LOW);
+      digitalWrite(PP_6, LOW);
       digitalWrite(PP_16, LOW);
       digitalWrite(PP_20, LOW);
       digitalWrite(PP_32, LOW);
       break;
 
     case 1:
-      analogWrite(PP_6, HIGH);
+      digitalWrite(PP_6, HIGH);
       digitalWrite(PP_16, LOW);
       digitalWrite(PP_20, LOW);
-      analogWrite(PP_32, LOW);
+      digitalWrite(PP_32, LOW);
       break;
 
     case 2:
-      analogWrite(PP_6, LOW);
+      digitalWrite(PP_6, LOW);
       digitalWrite(PP_16, HIGH);
       digitalWrite(PP_20, LOW);
-      analogWrite(PP_32, LOW);
+      digitalWrite(PP_32, LOW);
       break;
 
     case 3:
-      analogWrite(PP_6, LOW);
+      digitalWrite(PP_6, LOW);
       digitalWrite(PP_16, LOW);
       digitalWrite(PP_20, HIGH);
-      analogWrite(PP_32, LOW);
+      digitalWrite(PP_32, LOW);
       break;
 
     case 4:
-      analogWrite(PP_6, LOW);
+      digitalWrite(PP_6, LOW);
       digitalWrite(PP_16, LOW);
       digitalWrite(PP_20, LOW);
-      analogWrite(PP_32, HIGH);
+      digitalWrite(PP_32, HIGH);
       break;
 
     default:
@@ -298,6 +303,7 @@ void loop()
     case 2:
       digitalWrite(CHARGECOOL, LOW);
       digitalWrite(CHARGE, HIGH);
+      break;
 
     case 3:
       digitalWrite(CHARGE, LOW);
@@ -311,19 +317,19 @@ String mapCPValueAsModeName(uint8_t value){
   switch (value)
   {
   case 0:
-    return "NO CONNECT";
-    break;
+    return F("NO CONNECT");
+  
   case 1:
-    return "CAR";
-    break;
+    return F("CAR");
+
   case 2:
-    return "CHARGE";
-    break;
+    return F("CHARGE");
+  
   case 3 :
-    return "CHARGECOOL";
+    return F("CHARGECOOL");
   default:
-    return "ERROR";
-    break;
+    return F("ERROR");
+    
   }
 }
 
@@ -331,18 +337,22 @@ String mapPPValueAsModeName(uint8_t value){
    switch (value)
   {
   case 0:
-    return "PP-6";
-    break;
+    return F("NO CONNECT");
+
   case 1:
-    return "PP-16";
-    break;
+    return F("PP-6");
+   
   case 2:
-    return "PP-20";
-    break;
-  case 3 :
-    return "PP-32";
+    return F("PP-16");
+ 
+  case 3:
+    return F("PP-20");
+    
+  case 4 :
+    return F("PP-32");
+    
   default:
-    return "ERROR";
-    break;
+    return F("ERROR");
+  
   }
 }
