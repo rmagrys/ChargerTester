@@ -172,6 +172,7 @@ void loop()
       {
         selectCPMode = 0;
       }
+      setOutputValues();
       displayResults();
       buttonFunctionOccured = true;
     }
@@ -185,6 +186,7 @@ void loop()
       selectPPMode++;
       }
       displayResults();
+      setOutputValues();
       buttonFunctionOccured = true;
     }
   }
@@ -197,6 +199,7 @@ void loop()
       {
         selectCPMode--;
       }
+      setOutputValues();
       displayResults();
       buttonFunctionOccured = true;
   }
@@ -209,6 +212,7 @@ void loop()
       if(selectCPMode < 3){
         selectCPMode++;
         }
+        setOutputValues();
         displayResults();
     
       buttonFunctionOccured = true;
