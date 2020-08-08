@@ -94,6 +94,7 @@ uint16_t countdownToDisplay = 0;
 uint8_t selectCPMode = 0;
 uint8_t selectPPMode = 0;
 uint8_t selectPPModeByButton = 0;
+uint8_t selectPilotMode = 0;
 
 void displayResults();
 void setOutputValues();
@@ -101,6 +102,7 @@ String mapCPValueAsModeName(uint8_t value);
 String mapPPValueAsModeName(uint8_t value);
 boolean isCableChanged();
 boolean isAnyAnalogButtonPressed();
+void startingSelectiveMenu();
 
 void setup()
 {   
@@ -124,14 +126,36 @@ void setup()
     display.clearDisplay();
     display.setTextSize(3);
     display.setTextColor(WHITE);
-    display.setCursor(0, 0);
-    display.println(F("tester"));
+    display.setCursor(15, 0);
+    display.println(F("Witaj"));
     display.display();
-    delay(3000);
+    delay(1500);
+    startingSelectiveMenu();
 }
 
 void loop()
-{
+{   
+    readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
+
+    if( selectPilotMode == 0){
+        
+            if (isAnalogButtonPressed(analogButton1, readedButtonValue)){
+                selectPilotMode = 1;
+                anyButtonPressed = true;
+                functionOccuredOnce = true;
+                
+            }
+            else if (isAnalogButtonPressed(analogButton2, readedButtonValue))
+            {   
+                anyButtonPressed = true;
+                functionOccuredOnce = true;
+                selectPilotMode = 2; 
+            }
+        
+    }
+    
+
+
     readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
     readedPPVaule = analogRead(PP_CABLE_VOLTAGE);
 
@@ -146,6 +170,8 @@ void loop()
         anyButtonPressed = false;
         functionOccuredOnce = false;
     }
+
+    if( selectPilotMode == 1){
     if(isCableChanged() && !timerStarted){
         timeReadedAfterChange = millis();
         timerStarted = true;
@@ -206,17 +232,20 @@ void loop()
             timerStarted = false;
         }
     }
+    }
+    else if(selectPilotMode == 2){
 
+    
     if (isAnalogButtonPressed(analogButton1, readedButtonValue) && anyButtonPressed)
     {
         countdownTime = millis();
         if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce)
         {
-        if (selectPPModeByButton > 0)
+        if (selectPPMode > 0)
         {
-            selectPPModeByButton--;
+            selectPPMode--;
         }
-        if (selectPPModeByButton == 0)
+        if (selectPPMode == 0)
         {
             selectCPMode = 0;
         }
@@ -230,16 +259,17 @@ void loop()
         countdownTime = millis();
         if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce)
         {
-        if(selectPPModeByButton < 4){
-        selectPPModeByButton++;
+        if(selectPPMode < 4){
+        selectPPMode++;
         }
         displayResults();
         setOutputValues();
         functionOccuredOnce = true;
         }
     }
+    }
 
-    else if (isAnalogButtonPressed(analogButton3, readedButtonValue) && anyButtonPressed)
+    if (isAnalogButtonPressed(analogButton3, readedButtonValue) && anyButtonPressed)
     {
         countdownTime = millis();
         if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce)
@@ -301,7 +331,7 @@ void loop()
     displayResults();
   }
 
-
+    
 }
 
 
@@ -449,4 +479,23 @@ boolean isAnyAnalogButtonPressed(){
      (isAnalogButtonPressed(analogButton3, readedButtonValue) && !anyButtonPressed && selectPPMode > 0) ||
      (isAnalogButtonPressed(analogButton4, readedButtonValue) && !anyButtonPressed && selectPPMode > 0);
 
+}
+
+void startingSelectiveMenu(){
+
+    
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(50,0 );
+    display.println(F("Menu"));
+    display.setCursor(0,10);
+    display.println(F("Button 1"));
+    display.setCursor(4,18);
+    display.println("You have PP cable");
+    display.setCursor(0,30);
+    display.println("Button 2");
+    display.setCursor(4,38);
+    display.println("Simulate PP cable");
+    display.display();
 }
