@@ -4,15 +4,15 @@
 #include <Arduino.h>
 class AnalogButton{
 
-    uint16_t workingValue;
-    uint8_t tollerance;
+    uint16_t buttonMinValue;
+    uint16_t buttonMaxValue;
 
     public:
 
     AnalogButton();
-    AnalogButton(uint_fast16_t workingVaule, uint_fast8_t tollerance);
-    uint16_t buttonMinValue();
-    uint16_t buttonMaxValue();
+    AnalogButton(uint_fast16_t buttonMinValue, uint_fast16_t buttonMaxValue);
+    uint16_t getButtonMinValue();
+    uint16_t getButtonMaxValue();
         
 };
 #endif

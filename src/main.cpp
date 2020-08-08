@@ -13,27 +13,32 @@ Adafruit_SH1106 display(OLED_RESET);
 #error("Height incorrect, please fix Adafruit_SH1106.h!");
 #endif
 
-const uint8_t TOLLERANCE = 5;
-// const uint16_t BUTTON_1_VALUE = 769;
-// const uint16_t BUTTON_2_VALUE = 616;
-const uint16_t BUTTON_3_VALUE = 514;
-const uint16_t BUTTON_4_VALUE = 440;
+#define TOLLERANCE 5
+#define BUTTON_3_VALUE 514
+#define BUTTON_4_VALUE 440
 
-#define PP_READ_TOLLERANCE 40
-#define NO_CABLE_CONNECTION 823
-#define CABLE_32A 237
-#define CABLE_20A 455
-#define CABLE_13A 603
 
-// const AnalogButton analogButton1(BUTTON_1_VALUE, TOLLERANCE);
-// const AnalogButton analogButton2(BUTTON_2_VALUE, TOLLERANCE);
-const AnalogButton analogButton3(BUTTON_3_VALUE, TOLLERANCE);
-const AnalogButton analogButton4(BUTTON_4_VALUE, TOLLERANCE);
+#define NO_CABLE_CONNECTION 917                                      //823
 
-const AnalogButton noCableAnalogInput(NO_CABLE_CONNECTION, PP_READ_TOLLERANCE);
-const AnalogButton cable32A_AnalogInput(CABLE_32A, PP_READ_TOLLERANCE);
-const AnalogButton cable20A_AnalogInput(CABLE_20A, PP_READ_TOLLERANCE);
-const AnalogButton cable13A_AnalogInput(CABLE_13A, PP_READ_TOLLERANCE);
+#define CABLE_32A_MIN 305                                            //175             /// dla pilota bez mosfetów 180
+#define CABLE_32A_MAX 486                                            //314                 //310
+
+#define CABLE_20A_MIN 486                                          //314                //320
+#define CABLE_20A_MAX 706                                            //532                //530
+
+#define CABLE_13A_MIN 706                                            //534
+#define CABLE_13A_MAX 825                                           //685
+
+#define DELAY_BEFORE_CHANGES 200 
+
+
+const AnalogButton analogButton3(BUTTON_3_VALUE - TOLLERANCE , BUTTON_3_VALUE + TOLLERANCE);
+const AnalogButton analogButton4(BUTTON_4_VALUE - TOLLERANCE, BUTTON_4_VALUE + TOLLERANCE);
+
+const AnalogButton noCableAnalogInput(NO_CABLE_CONNECTION- TOLLERANCE, NO_CABLE_CONNECTION + TOLLERANCE);
+const AnalogButton cable32A_AnalogInput(CABLE_32A_MIN, CABLE_32A_MAX);
+const AnalogButton cable20A_AnalogInput(CABLE_20A_MIN, CABLE_20A_MAX);
+const AnalogButton cable13A_AnalogInput(CABLE_13A_MIN, CABLE_13A_MAX);
 
 
 boolean isNoCableDisplayedRecently = false;
@@ -41,32 +46,29 @@ boolean isCable_32ADisplayedRecently = false;
 boolean isCable_20AisplayedRecently = false;
 boolean isCable_13ADisplayedRecently = false;
 
-boolean isChangeDetected = false;
+boolean timerStarted = true;
 boolean isPPValueDisplayed = false;
 
+#define CP_PP_MODE_SELECTOR A2
+#define PP_CABLE_VOLTAGE A6
 
-const uint8_t CP_PP_MODE_SELECTOR = A2;
-const uint8_t PP_CABLE_VOLTAGE = A0;
-
-
-const uint8_t CAR = 10;
-const uint8_t CHARGE = 11;
-const uint8_t CHARGECOOL = 12;
+#define CAR 10
+#define CHARGE 11
+#define CHARGECOOL 12
 
 uint16_t readedButtonValue = 0;
-uint16_t previousReadedPPValue = 0;
 uint16_t readedPPVaule = 0;
 
-const uint16_t timeToHoldButton = 100;
+#define timeToHoldButton 100
 
 boolean anyButtonPressed = false;
-boolean buttonFunctionOccured = false;
+boolean functionOccuredOnce = false;
 uint16_t pressedButtonTime = 0;
 uint16_t countdownTime = 0;
 unsigned long timer;
 
-uint16_t timeReadedAfterChangeInLoop = 0;
-uint16_t timeAfterChange = 0;
+uint16_t timeReadedAfterChange = 0;
+uint16_t countdownToDisplay = 0;
 
 
 uint8_t selectCPMode = 0;
@@ -76,6 +78,7 @@ void displayResults();
 void setOutputValues();
 String mapCPValueAsModeName(uint8_t value);
 String mapPPValueAsModeName(uint8_t value);
+boolean isCableChanged();
 
 void setup()
 {
@@ -103,14 +106,7 @@ void loop()
     readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
     readedPPVaule = analogRead(PP_CABLE_VOLTAGE);
 
-    Serial.println(readedButtonValue);
-
-    if (abs(previousReadedPPValue - readedButtonValue) > 100) {
-        timeReadedAfterChangeInLoop = millis();
-    }
-    previousReadedPPValue = analogRead(PP_CABLE_VOLTAGE);
-    // Serial.println(readedPPVaule);
-
+    Serial.println(readedPPVaule);
 
     if (isAnalogButtonPressed(analogButton3, readedButtonValue) && !anyButtonPressed)
     {
@@ -125,12 +121,17 @@ void loop()
     else if (readedButtonValue == 0)
     {
         anyButtonPressed = false;
-        buttonFunctionOccured = false;
+        functionOccuredOnce = false;
     }
+    if(isCableChanged() && !timerStarted){
+        timeReadedAfterChange = millis();
+        timerStarted = true;
+    }
+ 
 
     if (isDefinedAnalogValuePresent(noCableAnalogInput, readedPPVaule) && !isNoCableDisplayedRecently) {
-        timeAfterChange = millis();
-       // if (timeAfterChange - timeReadedAfterChangeInLoop > 100) {
+        countdownToDisplay = millis();
+        if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
             isNoCableDisplayedRecently = true;
             isCable_13ADisplayedRecently = false;
             isCable_20AisplayedRecently = false;
@@ -139,25 +140,26 @@ void loop()
             Serial.println("No Cable");
 
             displayResults();
-       // }
+            timerStarted = false;
+        }
     }
-    if (isDefinedAnalogValuePresent(cable32A_AnalogInput, readedPPVaule) && !isCable_32ADisplayedRecently) {
-        timeAfterChange = millis();
-       // if (timeAfterChange - timeReadedAfterChangeInLoop > 100) {
+    else if (isDefinedAnalogValuePresent(cable32A_AnalogInput, readedPPVaule) && !isCable_32ADisplayedRecently) {
+        countdownToDisplay = millis();
+        if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
             isCable_32ADisplayedRecently = true;
             isNoCableDisplayedRecently = false;
             isCable_13ADisplayedRecently = false;
             isCable_20AisplayedRecently = false;
-
-            Serial.println("32 A");
             selectPPMode = 1;
-
+            Serial.println("32 A");
+        
             displayResults();
-       // }
+            timerStarted = false;
+        }
     }
-    if (isDefinedAnalogValuePresent(cable20A_AnalogInput, readedPPVaule) && !isCable_20AisplayedRecently) {
-        timeAfterChange = millis();
-      //  if (timeAfterChange - timeReadedAfterChangeInLoop > 100) {
+    else if (isDefinedAnalogValuePresent(cable20A_AnalogInput, readedPPVaule) && !isCable_20AisplayedRecently) {
+        countdownToDisplay = millis();
+       if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
             isCable_20AisplayedRecently = true;
             isNoCableDisplayedRecently = false;
             isCable_13ADisplayedRecently = false;
@@ -165,11 +167,12 @@ void loop()
             Serial.println("20 A");
             selectPPMode = 2;
             displayResults();
-      //  }
+            timerStarted = false;
+       }
     }
-    if (isDefinedAnalogValuePresent(cable13A_AnalogInput, readedPPVaule) && !isCable_13ADisplayedRecently) {
-        timeAfterChange = millis();
-       // if (timeAfterChange - timeReadedAfterChangeInLoop > 100) {
+    else if (isDefinedAnalogValuePresent(cable13A_AnalogInput, readedPPVaule) && !isCable_13ADisplayedRecently) {
+        countdownToDisplay = millis();
+        if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
             isCable_13ADisplayedRecently = true;
             isNoCableDisplayedRecently = false;
             isCable_20AisplayedRecently = false;
@@ -177,7 +180,8 @@ void loop()
             Serial.println("13 A");
             selectPPMode = 3;
             displayResults();
-       // }
+            timerStarted = false;
+        }
     }
 
 
@@ -185,7 +189,7 @@ void loop()
     if (isAnalogButtonPressed(analogButton3, readedButtonValue) && anyButtonPressed)
     {
         countdownTime = millis();
-        if (countdownTime - pressedButtonTime > timeToHoldButton && !buttonFunctionOccured)
+        if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce)
         {
             if (selectCPMode > 0)
             {
@@ -193,13 +197,13 @@ void loop()
             }
             setOutputValues();
             displayResults();
-            buttonFunctionOccured = true;
+            functionOccuredOnce = true;
         }
     }
     else if (isAnalogButtonPressed(analogButton4, readedButtonValue) && anyButtonPressed)
     {
         countdownTime = millis();
-        if (countdownTime - pressedButtonTime > timeToHoldButton && !buttonFunctionOccured)
+        if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce)
         {
             if (selectCPMode < 3) 
             {
@@ -207,7 +211,7 @@ void loop()
             }
             setOutputValues();
             displayResults();
-            buttonFunctionOccured = true;
+            functionOccuredOnce = true;
         }
     }
 
@@ -294,4 +298,11 @@ String mapPPValueAsModeName(uint8_t value) {
         return F("ERROR");
 
     }
+}
+
+boolean isCableChanged(){
+    return (isDefinedAnalogValuePresent(noCableAnalogInput, readedPPVaule) && !isNoCableDisplayedRecently) ||
+        (isDefinedAnalogValuePresent(cable32A_AnalogInput, readedPPVaule) && !isCable_32ADisplayedRecently) ||
+        (isDefinedAnalogValuePresent(cable20A_AnalogInput, readedPPVaule) && !isCable_20AisplayedRecently) ||
+        (isDefinedAnalogValuePresent(cable13A_AnalogInput, readedPPVaule) && !isCable_13ADisplayedRecently);
 }
