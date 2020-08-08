@@ -13,7 +13,11 @@ Adafruit_SH1106 display(OLED_RESET);
 #error("Height incorrect, please fix Adafruit_SH1106.h!");
 #endif
 
+
+
 #define TOLLERANCE 5
+#define BUTTON_1_VALUE 769
+#define BUTTON_2_VALUE 616
 #define BUTTON_3_VALUE 514
 #define BUTTON_4_VALUE 440
 
@@ -31,7 +35,8 @@ Adafruit_SH1106 display(OLED_RESET);
 
 #define DELAY_BEFORE_CHANGES 200 
 
-
+const AnalogButton analogButton1(BUTTON_1_VALUE - TOLLERANCE, BUTTON_1_VALUE + TOLLERANCE);
+const AnalogButton analogButton2(BUTTON_2_VALUE - TOLLERANCE, BUTTON_1_VALUE + TOLLERANCE);
 const AnalogButton analogButton3(BUTTON_3_VALUE - TOLLERANCE , BUTTON_3_VALUE + TOLLERANCE);
 const AnalogButton analogButton4(BUTTON_4_VALUE - TOLLERANCE, BUTTON_4_VALUE + TOLLERANCE);
 
@@ -49,12 +54,27 @@ boolean isCable_13ADisplayedRecently = false;
 boolean timerStarted = true;
 boolean isPPValueDisplayed = false;
 
+#define errorButton1 3
+#define errorButton2 2
+#define errorButton3 5
+boolean errorButton1Pressed = false;
+boolean errorButton2Pressed = false;
+boolean errorButton3Pressed = false;
+
+const String CP_PP_SHORT_ERROR = "CP PP SHORT";
+const String PP_DISCONECT_ERROR = "PP DISCONNECT";
+const String DIODE_ERROR = "CP NO DIODE";
+
 #define CP_PP_MODE_SELECTOR A2
 #define PP_CABLE_VOLTAGE A6
 
 #define CAR 10
 #define CHARGE 11
 #define CHARGECOOL 12
+
+#define PP_32A A0
+#define PP_13A 6
+#define PP_20A 13
 
 uint16_t readedButtonValue = 0;
 uint16_t readedPPVaule = 0;
@@ -73,15 +93,24 @@ uint16_t countdownToDisplay = 0;
 
 uint8_t selectCPMode = 0;
 uint8_t selectPPMode = 0;
+uint8_t selectPPModeByButton = 0;
 
 void displayResults();
 void setOutputValues();
 String mapCPValueAsModeName(uint8_t value);
 String mapPPValueAsModeName(uint8_t value);
 boolean isCableChanged();
+boolean isAnyAnalogButtonPressed();
 
 void setup()
-{
+{   
+    pinMode(errorButton1, INPUT);
+    pinMode(errorButton2, INPUT);
+    pinMode(errorButton3, INPUT);
+
+    pinMode(PP_20A, OUTPUT);
+    pinMode(PP_13A, OUTPUT);
+    pinMode(PP_32A, OUTPUT);
 
     pinMode(CAR, OUTPUT);
     pinMode(CHARGE, OUTPUT);
@@ -106,15 +135,9 @@ void loop()
     readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
     readedPPVaule = analogRead(PP_CABLE_VOLTAGE);
 
-    Serial.println(readedPPVaule);
+    Serial.println(readedButtonValue);
 
-    if (isAnalogButtonPressed(analogButton3, readedButtonValue) && !anyButtonPressed)
-    {
-        anyButtonPressed = true;
-        pressedButtonTime = millis();
-    }
-    else if (isAnalogButtonPressed(analogButton4, readedButtonValue) && !anyButtonPressed)
-    {
+    if (isAnyAnalogButtonPressed()){
         anyButtonPressed = true;
         pressedButtonTime = millis();
     }
@@ -159,7 +182,7 @@ void loop()
     }
     else if (isDefinedAnalogValuePresent(cable20A_AnalogInput, readedPPVaule) && !isCable_20AisplayedRecently) {
         countdownToDisplay = millis();
-       if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
+        if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
             isCable_20AisplayedRecently = true;
             isNoCableDisplayedRecently = false;
             isCable_13ADisplayedRecently = false;
@@ -184,9 +207,39 @@ void loop()
         }
     }
 
+    if (isAnalogButtonPressed(analogButton1, readedButtonValue) && anyButtonPressed)
+    {
+        countdownTime = millis();
+        if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce)
+        {
+        if (selectPPModeByButton > 0)
+        {
+            selectPPModeByButton--;
+        }
+        if (selectPPModeByButton == 0)
+        {
+            selectCPMode = 0;
+        }
+        setOutputValues();
+        displayResults();
+        functionOccuredOnce = true;
+        }
+    }
+    else if (isAnalogButtonPressed(analogButton2, readedButtonValue) && anyButtonPressed)
+    {
+        countdownTime = millis();
+        if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce)
+        {
+        if(selectPPModeByButton < 4){
+        selectPPModeByButton++;
+        }
+        displayResults();
+        setOutputValues();
+        functionOccuredOnce = true;
+        }
+    }
 
-
-    if (isAnalogButtonPressed(analogButton3, readedButtonValue) && anyButtonPressed)
+    else if (isAnalogButtonPressed(analogButton3, readedButtonValue) && anyButtonPressed)
     {
         countdownTime = millis();
         if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce)
@@ -214,9 +267,44 @@ void loop()
             functionOccuredOnce = true;
         }
     }
+    if (digitalRead(errorButton1) == HIGH && !errorButton1Pressed)
+  {
+    errorButton1Pressed = true;
+    displayResults();
+  }
+  else if (digitalRead(errorButton1) == LOW && errorButton1Pressed)
+  {
+    errorButton1Pressed = false;
+    displayResults();
+  }
+
+  if (digitalRead(errorButton2) == HIGH && !errorButton2Pressed)
+  {
+    errorButton2Pressed = true;
+    displayResults();
+  }
+  else if (digitalRead(errorButton2) == LOW && errorButton2Pressed)
+  {
+    errorButton2Pressed = false;
+    displayResults();
+  }
+
+  if (digitalRead(errorButton3) == HIGH && !errorButton3Pressed)
+  {
+    errorButton3Pressed = true;
+
+    displayResults();
+  }
+  else if (digitalRead(errorButton3) == LOW && errorButton3Pressed)
+  {
+    errorButton3Pressed = false;
+    displayResults();
+  }
 
 
 }
+
+
 void displayResults()
 {
     display.clearDisplay();
@@ -226,11 +314,59 @@ void displayResults()
     display.println(mapPPValueAsModeName(selectPPMode));
     display.setCursor(64, 0);
     display.println(mapCPValueAsModeName(selectCPMode));
+    if (errorButton1Pressed)
+    {
+      display.setCursor(0, 40);
+      display.println("ERROR " + PP_DISCONECT_ERROR);
+    }
+    if (errorButton2Pressed)
+    {
+      display.setCursor(0, 48);
+      display.println("ERROR "  + CP_PP_SHORT_ERROR);
+    }
+    if (errorButton3Pressed)
+    {
+      display.setCursor(0, 56);
+      display.println("ERROR " + DIODE_ERROR);
+    }
     display.display();
 }
 
 void setOutputValues()
 {
+    switch (selectPPModeByButton)
+    {
+    case 0:
+      
+      digitalWrite(PP_13A, LOW);
+      digitalWrite(PP_20A, LOW);
+      digitalWrite(PP_32A, LOW);
+      break;
+
+    case 1:
+      
+      digitalWrite(PP_13A, LOW);
+      digitalWrite(PP_20A, LOW);
+      digitalWrite(PP_32A, HIGH);
+      break;
+
+    case 2:
+      digitalWrite(PP_32A, LOW);
+      digitalWrite(PP_13A, LOW);
+      digitalWrite(PP_20A, HIGH);
+      
+      break;
+
+    case 3:
+      digitalWrite(PP_32A, LOW);
+      digitalWrite(PP_20A, LOW);
+      digitalWrite(PP_13A, HIGH);
+      break;
+
+    default:
+      break;
+    }
+
     switch (selectCPMode)
     {
     case 0:
@@ -305,4 +441,12 @@ boolean isCableChanged(){
         (isDefinedAnalogValuePresent(cable32A_AnalogInput, readedPPVaule) && !isCable_32ADisplayedRecently) ||
         (isDefinedAnalogValuePresent(cable20A_AnalogInput, readedPPVaule) && !isCable_20AisplayedRecently) ||
         (isDefinedAnalogValuePresent(cable13A_AnalogInput, readedPPVaule) && !isCable_13ADisplayedRecently);
+}
+
+boolean isAnyAnalogButtonPressed(){
+    return (isAnalogButtonPressed(analogButton1, readedButtonValue) && !anyButtonPressed ) ||
+     (isAnalogButtonPressed(analogButton2, readedButtonValue) && !anyButtonPressed ) ||
+     (isAnalogButtonPressed(analogButton3, readedButtonValue) && !anyButtonPressed && selectPPMode > 0) ||
+     (isAnalogButtonPressed(analogButton4, readedButtonValue) && !anyButtonPressed && selectPPMode > 0);
+
 }
