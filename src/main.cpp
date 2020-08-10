@@ -22,16 +22,16 @@ Adafruit_SH1106 display(OLED_RESET);
 #define BUTTON_4_VALUE 440
 
 
-#define NO_CABLE_CONNECTION 917                                      //823
+#define NO_CABLE_CONNECTION 823                                      //823
 
-#define CABLE_32A_MIN 305                                            //175             /// dla pilota bez mosfetów 180
-#define CABLE_32A_MAX 486                                            //314                 //310
+#define CABLE_32A_MIN 175                                            //175             /// dla pilota bez mosfetów 180
+#define CABLE_32A_MAX 314                                            //314                 //310
 
-#define CABLE_20A_MIN 486                                          //314                //320
-#define CABLE_20A_MAX 706                                            //532                //530
+#define CABLE_20A_MIN 314                                          //314                //320
+#define CABLE_20A_MAX 532                                          //532                //530
 
-#define CABLE_13A_MIN 706                                            //534
-#define CABLE_13A_MAX 825                                           //685
+#define CABLE_13A_MIN 534                                            //534
+#define CABLE_13A_MAX 685                                           //685
 
 #define DELAY_BEFORE_CHANGES 200 
 
@@ -53,17 +53,6 @@ boolean isCable_13ADisplayedRecently = false;
 
 boolean timerStarted = true;
 boolean isPPValueDisplayed = false;
-
-#define errorButton1 3
-#define errorButton2 2
-#define errorButton3 5
-boolean errorButton1Pressed = false;
-boolean errorButton2Pressed = false;
-boolean errorButton3Pressed = false;
-
-const String CP_PP_SHORT_ERROR = "CP PP SHORT";
-const String PP_DISCONECT_ERROR = "PP DISCONNECT";
-const String DIODE_ERROR = "CP NO DIODE";
 
 #define CP_PP_MODE_SELECTOR A2
 #define PP_CABLE_VOLTAGE A6
@@ -94,7 +83,7 @@ uint16_t countdownToDisplay = 0;
 uint8_t selectCPMode = 0;
 uint8_t selectPPMode = 0;
 uint8_t selectPPModeByButton = 0;
-uint8_t selectPilotMode = 0;
+uint8_t selectPilotMode = 1;
 
 void displayResults();
 void setOutputValues();
@@ -106,9 +95,7 @@ void startingSelectiveMenu();
 
 void setup()
 {   
-    pinMode(errorButton1, INPUT);
-    pinMode(errorButton2, INPUT);
-    pinMode(errorButton3, INPUT);
+
 
     pinMode(PP_20A, OUTPUT);
     pinMode(PP_13A, OUTPUT);
@@ -130,36 +117,34 @@ void setup()
     display.println(F("Witaj"));
     display.display();
     delay(1500);
-    startingSelectiveMenu();
 }
 
 void loop()
 {   
     readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
 
-    if( selectPilotMode == 0){
+    // if( selectPilotMode == 0){
         
-            if (isAnalogButtonPressed(analogButton1, readedButtonValue)){
-                selectPilotMode = 1;
-                anyButtonPressed = true;
-                functionOccuredOnce = true;
+    //         if (isAnalogButtonPressed(analogButton1, readedButtonValue)){
+    //             selectPilotMode = 1;
+    //             anyButtonPressed = true;
+    //             functionOccuredOnce = true;
                 
-            }
-            else if (isAnalogButtonPressed(analogButton2, readedButtonValue))
-            {   
-                anyButtonPressed = true;
-                functionOccuredOnce = true;
-                selectPilotMode = 2; 
-            }
+    //         }
+    //         else if (isAnalogButtonPressed(analogButton2, readedButtonValue))
+    //         {   
+    //             anyButtonPressed = true;
+    //             functionOccuredOnce = true;
+    //             selectPilotMode = 2; 
+    //         }
         
-    }
+    // }
     
 
 
     readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
     readedPPVaule = analogRead(PP_CABLE_VOLTAGE);
 
-    Serial.println(readedButtonValue);
 
     if (isAnyAnalogButtonPressed()){
         anyButtonPressed = true;
@@ -186,6 +171,7 @@ void loop()
             isCable_20AisplayedRecently = false;
             isCable_32ADisplayedRecently = false;
             selectPPMode = 0;
+            selectCPMode = 0;
             Serial.println("No Cable");
 
             displayResults();
@@ -297,39 +283,7 @@ void loop()
             functionOccuredOnce = true;
         }
     }
-    if (digitalRead(errorButton1) == HIGH && !errorButton1Pressed)
-  {
-    errorButton1Pressed = true;
-    displayResults();
-  }
-  else if (digitalRead(errorButton1) == LOW && errorButton1Pressed)
-  {
-    errorButton1Pressed = false;
-    displayResults();
-  }
-
-  if (digitalRead(errorButton2) == HIGH && !errorButton2Pressed)
-  {
-    errorButton2Pressed = true;
-    displayResults();
-  }
-  else if (digitalRead(errorButton2) == LOW && errorButton2Pressed)
-  {
-    errorButton2Pressed = false;
-    displayResults();
-  }
-
-  if (digitalRead(errorButton3) == HIGH && !errorButton3Pressed)
-  {
-    errorButton3Pressed = true;
-
-    displayResults();
-  }
-  else if (digitalRead(errorButton3) == LOW && errorButton3Pressed)
-  {
-    errorButton3Pressed = false;
-    displayResults();
-  }
+    
 
     
 }
@@ -344,21 +298,6 @@ void displayResults()
     display.println(mapPPValueAsModeName(selectPPMode));
     display.setCursor(64, 0);
     display.println(mapCPValueAsModeName(selectCPMode));
-    if (errorButton1Pressed)
-    {
-      display.setCursor(0, 40);
-      display.println("ERROR " + PP_DISCONECT_ERROR);
-    }
-    if (errorButton2Pressed)
-    {
-      display.setCursor(0, 48);
-      display.println("ERROR "  + CP_PP_SHORT_ERROR);
-    }
-    if (errorButton3Pressed)
-    {
-      display.setCursor(0, 56);
-      display.println("ERROR " + DIODE_ERROR);
-    }
     display.display();
 }
 
