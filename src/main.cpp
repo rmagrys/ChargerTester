@@ -68,6 +68,7 @@ const String DIODE_ERROR = "CP NO DIODE";
 #define CP_PP_MODE_SELECTOR A2
 #define PP_CABLE_VOLTAGE A6
 
+#define CP_FREQUENCY 7
 #define CAR 10
 #define CHARGE 11
 #define CHARGECOOL 12
@@ -78,6 +79,7 @@ const String DIODE_ERROR = "CP NO DIODE";
 
 uint16_t readedButtonValue = 0;
 uint16_t readedPPVaule = 0;
+uint16_t frequency = 0;
 
 #define timeToHoldButton 100
 
@@ -96,6 +98,8 @@ uint8_t selectPPMode = 0;
 uint8_t selectPPModeByButton = 0;
 uint8_t selectPilotMode = 0;
 
+unsigned long wynik = 0;
+
 void displayResults();
 void setOutputValues();
 String mapCPValueAsModeName(uint8_t value);
@@ -103,12 +107,15 @@ String mapPPValueAsModeName(uint8_t value);
 boolean isCableChanged();
 boolean isAnyAnalogButtonPressed();
 void startingSelectiveMenu();
+void readFrequency();
 
 void setup()
 {   
     pinMode(errorButton1, INPUT);
     pinMode(errorButton2, INPUT);
     pinMode(errorButton3, INPUT);
+
+    attachInterrupt(digitalPinToInterrupt(CP_FREQUENCY),readFrequency,RISING);
 
     pinMode(PP_20A, OUTPUT);
     pinMode(PP_13A, OUTPUT);
@@ -117,6 +124,7 @@ void setup()
     pinMode(CAR, OUTPUT);
     pinMode(CHARGE, OUTPUT);
     pinMode(CHARGECOOL, OUTPUT);
+    pinMode(CP_FREQUENCY, INPUT_PULLUP);
 
     Wire.begin();
     Serial.begin(115200);
@@ -137,6 +145,12 @@ void loop()
 {   
     readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
 
+    //frequency = digitalRead(CP_FREQUENCY);
+
+     
+
+    Serial.println(frequency); 
+
     if( selectPilotMode == 0){
         
             if (isAnalogButtonPressed(analogButton1, readedButtonValue)){
@@ -147,9 +161,10 @@ void loop()
             }
             else if (isAnalogButtonPressed(analogButton2, readedButtonValue))
             {   
+                selectPilotMode = 2; 
                 anyButtonPressed = true;
                 functionOccuredOnce = true;
-                selectPilotMode = 2; 
+                
             }
         
     }
@@ -159,7 +174,7 @@ void loop()
     readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
     readedPPVaule = analogRead(PP_CABLE_VOLTAGE);
 
-    Serial.println(readedButtonValue);
+    Serial.println(wynik);
 
     if (isAnyAnalogButtonPressed()){
         anyButtonPressed = true;
@@ -499,3 +514,7 @@ void startingSelectiveMenu(){
     display.println("Simulate PP cable");
     display.display();
 }
+
+   void readFrequency(){
+       wynik = micros();
+   }
