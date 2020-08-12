@@ -1,10 +1,12 @@
 #include <Arduino.h>
+#include <math.h>
 #include <AnalogButton.h>
 #include <buttonHandler.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH1106.h>
+#include <time.h>
 
 #define OLED_RESET 4
 Adafruit_SH1106 display(OLED_RESET);
@@ -13,6 +15,15 @@ Adafruit_SH1106 display(OLED_RESET);
 #error("Height incorrect, please fix Adafruit_SH1106.h!");
 #endif
 
+typedef struct {
+    unsigned long high_1 = 0;
+    unsigned long low_1 = 0 ;
+    unsigned long high_2 = 0;
+}PeriodMeasurement;
+
+typedef struct {
+    uint8_t counter : 3;
+}Counter;
 
 
 #define TOLLERANCE 5
@@ -57,6 +68,7 @@ boolean isPPValueDisplayed = false;
 #define CP_PP_MODE_SELECTOR A2
 #define PP_CABLE_VOLTAGE A6
 
+#define FREQUENCY_READ 2
 #define CAR 10
 #define CHARGE 11
 #define CHARGECOOL 12
@@ -85,6 +97,23 @@ uint8_t selectPPMode = 0;
 uint8_t selectPPModeByButton = 0;
 uint8_t selectPilotMode = 1;
 
+
+uint8_t counter = 0;
+boolean firstRisingDetected = false;
+float calculations = 0; 
+float frequencyValue = 0;
+float newFrequencyValue = 0;
+
+float pulseWidthValue = 0;
+float newPulseWidthValue = 0;
+
+boolean frequencyBeyondTheNorm = false;
+
+#define NUMBER_OF_MEASURMENTS 8
+PeriodMeasurement periodMeasurement[NUMBER_OF_MEASURMENTS];
+Counter m_counter = { .counter = 0 };
+Counter counter2 = { .counter = 0};
+
 void displayResults();
 void setOutputValues();
 String mapCPValueAsModeName(uint8_t value);
@@ -92,11 +121,19 @@ String mapPPValueAsModeName(uint8_t value);
 boolean isCableChanged();
 boolean isAnyAnalogButtonPressed();
 void startingSelectiveMenu();
+void readFrequency();
+void swap(float* xp, float* yp);
+void selectionSort(float arr[], uint8_t n);
+float calculateFrequency(PeriodMeasurement periodMeasurement[]);
+float calculatePulseWidth(PeriodMeasurement periodMeasurement[]);
+
 
 void setup()
-{   
-
-
+{       
+    pinMode(FREQUENCY_READ, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(FREQUENCY_READ), readFrequency, CHANGE);
+     
+    
     pinMode(PP_20A, OUTPUT);
     pinMode(PP_13A, OUTPUT);
     pinMode(PP_32A, OUTPUT);
@@ -123,6 +160,7 @@ void loop()
 {   
     readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
 
+
     // if( selectPilotMode == 0){
         
     //         if (isAnalogButtonPressed(analogButton1, readedButtonValue)){
@@ -139,8 +177,40 @@ void loop()
     //         }
         
     // }
+    // if(periodMeasurement[0] - periodMeasurement[2] != 0){
+    // calculations = 1/ (periodMeasurement[2] - periodMeasurement[0]);
+    // }
+
+
+    //calculations = (round(1 / ((periodMeasurement[2]- periodMeasurement[0]) / 1000 ) *1000)) ;
+    //calculations =  (periodMeasurement[1] - periodMeasurement[0]) / (periodMeasurement[2] - periodMeasurement[0]) *100;
+
+
+    //Serial.println(periodMeasurement[5].high_2-periodMeasurement[5].high_1);
+    frequencyValue = calculateFrequency(periodMeasurement);
+    pulseWidthValue = calculatePulseWidth(periodMeasurement);
+
+    Serial.println(frequencyValue);
+
+    if(abs(abs(newFrequencyValue) - abs(frequencyValue)) > 10
+    || abs(abs(newPulseWidthValue) - abs(pulseWidthValue)) > 2){
+        newFrequencyValue = frequencyValue;
+        newPulseWidthValue = pulseWidthValue;
+        displayResults();
+    }
+    //Serial.println(frequencyValue);
+    // Serial.println(pulseWidthValue);
+
     
 
+    //  if( (frequencyValue < 1050.0F || frequencyValue > 950.0F) && frequencyBeyondTheNorm){
+    //      frequencyBeyondTheNorm = false;
+    //      displayResults();
+    //  }
+    //  else if((frequencyValue > 1050.0F || frequencyValue < 950.0F) && !frequencyBeyondTheNorm) {
+    //      frequencyBeyondTheNorm = true;
+    //      displayResults();
+    //  }
 
     readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
     readedPPVaule = analogRead(PP_CABLE_VOLTAGE);
@@ -298,7 +368,16 @@ void displayResults()
     display.println(mapPPValueAsModeName(selectPPMode));
     display.setCursor(64, 0);
     display.println(mapCPValueAsModeName(selectCPMode));
+    display.setCursor(0, 18);
+    display.println("Frequency: " + String(frequencyValue) + " Hz");
+    display.setCursor(0, 36);
+    display.println("Pulse Width: " + String(pulseWidthValue) + " %");
+     if(frequencyBeyondTheNorm){
+         display.setCursor(0, 52);
+         display.println("Freq beyond the norm");
+     }
     display.display();
+
 }
 
 void setOutputValues()
@@ -438,3 +517,89 @@ void startingSelectiveMenu(){
     display.println("Simulate PP cable");
     display.display();
 }
+
+void readFrequency(){
+    if(digitalRead(FREQUENCY_READ) == LOW  && !firstRisingDetected){
+        periodMeasurement[m_counter.counter].high_1 = micros();
+        firstRisingDetected = true;
+    }
+    else if(digitalRead(FREQUENCY_READ) == HIGH  && firstRisingDetected){
+        periodMeasurement[m_counter.counter].low_1 = micros();
+    }
+    else if (digitalRead(FREQUENCY_READ) == LOW && firstRisingDetected){
+        periodMeasurement[m_counter.counter].high_2 = micros();
+        firstRisingDetected = false;
+        m_counter.counter++;
+    }
+
+}
+
+float calculateFrequency(PeriodMeasurement periodMeasurement[]){
+    float averagePeriod[8] = {0,0,0,0,0,0};
+    float average = 0;
+    for(int i = 0; i <= 7; i++){
+        averagePeriod[i] = float(periodMeasurement[i].high_2 - periodMeasurement[i].high_1);
+    }
+
+    selectionSort(averagePeriod,8);
+
+    for(int i = 2; i <=5; i++){
+        average += averagePeriod[i];
+    }
+    average = average / 4;
+
+    average = (1 / (average / 1000 )) * 1000;
+
+    return average;
+}
+
+
+
+float calculatePulseWidth(PeriodMeasurement periodMeasurement[]){
+    float averagePulseWidth[8] = {0,0,0,0,0,0};
+    float average = 0;
+    for(int i = 0; i<=7; i++){
+        averagePulseWidth[i] = (float(periodMeasurement[i].low_1 - periodMeasurement[i].high_1) ) /
+                                float(periodMeasurement[i].high_2 - periodMeasurement[i].high_1) ;
+    }
+
+    selectionSort(averagePulseWidth,8);
+
+    for(int i = 1; i<=5; i++){
+        average += averagePulseWidth[i];
+    }
+
+    average = average / 4;
+
+    if( average > 1){
+        average = 1;
+    }
+    return average * 100 ;
+}
+
+void swap(float* xp, float* yp) 
+{ 
+    float temp = *xp; 
+    *xp = *yp; 
+    *yp = temp; 
+} 
+  
+
+void selectionSort(float arr[], uint8_t n) 
+{ 
+    uint8_t i, j, min_idx; 
+  
+    // One by one move boundary of unsorted subarray 
+    for (i = 0; i < n - 1; i++) { 
+  
+        // Find the minimum element in unsorted array 
+        min_idx = i; 
+        for (j = i + 1; j < n; j++) 
+            if (arr[j] < arr[min_idx]) 
+                min_idx = j; 
+  
+        // Swap the found minimum element 
+        // with the first element 
+        swap(&arr[min_idx], &arr[i]); 
+    } 
+} 
