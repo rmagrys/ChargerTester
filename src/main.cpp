@@ -10,19 +10,12 @@
 
 #define OLED_RESET 4
 Adafruit_SH1106 display(OLED_RESET);
-//Adafruit_SSD1306 display(SCREEN_WIDTH ,SCREN_HEIGHT, &Wire , OLED_RESET);
 #if (SH1106_LCDHEIGHT != 64)
 #error("Height incorrect, please fix Adafruit_SH1106.h!");
 #endif
 
 typedef struct {
-    unsigned long high_1 = 0;
-    unsigned long low_1 = 0 ;
-    unsigned long high_2 = 0;
-}PeriodMeasurement;
-
-typedef struct {
-    uint8_t counter : 3;
+    uint8_t counter : 4;
 }Counter;
 
 
@@ -51,7 +44,7 @@ const AnalogButton analogButton2(BUTTON_2_VALUE - TOLLERANCE, BUTTON_1_VALUE + T
 const AnalogButton analogButton3(BUTTON_3_VALUE - TOLLERANCE , BUTTON_3_VALUE + TOLLERANCE);
 const AnalogButton analogButton4(BUTTON_4_VALUE - TOLLERANCE, BUTTON_4_VALUE + TOLLERANCE);
 
-const AnalogButton noCableAnalogInput(NO_CABLE_CONNECTION- TOLLERANCE, NO_CABLE_CONNECTION + TOLLERANCE);
+const AnalogButton noCableAnalogInput(NO_CABLE_CONNECTION - TOLLERANCE, NO_CABLE_CONNECTION + TOLLERANCE);
 const AnalogButton cable32A_AnalogInput(CABLE_32A_MIN, CABLE_32A_MAX);
 const AnalogButton cable20A_AnalogInput(CABLE_20A_MIN, CABLE_20A_MAX);
 const AnalogButton cable13A_AnalogInput(CABLE_13A_MIN, CABLE_13A_MAX);
@@ -68,6 +61,7 @@ boolean isPPValueDisplayed = false;
 #define CP_PP_MODE_SELECTOR A2
 #define PP_CABLE_VOLTAGE A6
 
+#define CP_ERROR_PIN 4
 #define FREQUENCY_READ 2
 #define CAR 10
 #define CHARGE 11
@@ -81,6 +75,16 @@ uint16_t readedButtonValue = 0;
 uint16_t readedPPVaule = 0;
 
 #define timeToHoldButton 100
+#define TIME_TO_HOLD_BUTTON_FOR_ERROR 6000
+#define SEK_1 1000
+#define SEK_2 2000
+#define SEK_3 3000
+#define SEK_4 4000
+#define SEK_5 5000
+uint8_t countdown = 0;
+boolean sekDisplay[5] = {0,0,0,0,0};
+boolean cpErrorOn = false;
+boolean errorSwitch = false;
 
 boolean anyButtonPressed = false;
 boolean functionOccuredOnce = false;
@@ -99,7 +103,6 @@ uint8_t selectPilotMode = 1;
 
 
 uint8_t counter = 0;
-boolean firstRisingDetected = false;
 float calculations = 0; 
 float frequencyValue = 0;
 float newFrequencyValue = 0;
@@ -109,10 +112,19 @@ float newPulseWidthValue = 0;
 
 boolean frequencyBeyondTheNorm = false;
 
-#define NUMBER_OF_MEASURMENTS 8
-PeriodMeasurement periodMeasurement[NUMBER_OF_MEASURMENTS];
+#define NUMBER_OF_MEASURMENTS 16
+#define DATA_COUNT 2
+#define MICROS 0
+#define STATE 1 
+unsigned long periodMeasurement[NUMBER_OF_MEASURMENTS][DATA_COUNT];
+
 Counter m_counter = { .counter = 0 };
 Counter counter2 = { .counter = 0};
+
+
+uint16_t  currentTimer  = 0;
+uint16_t  previousTimer = 0;
+bool interuptTurnedOn = false;
 
 void displayResults();
 void setOutputValues();
@@ -124,16 +136,17 @@ void startingSelectiveMenu();
 void readFrequency();
 void swap(float* xp, float* yp);
 void selectionSort(float arr[], uint8_t n);
-float calculateFrequency(PeriodMeasurement periodMeasurement[]);
-float calculatePulseWidth(PeriodMeasurement periodMeasurement[]);
+void resetMeasurements();
+void resetCountdown();
 
+float calculateFrequency(unsigned long periodMeasurement[][DATA_COUNT]);
+float calculatePulseWidth(unsigned long periodMeasurement[][DATA_COUNT]);
 
 void setup()
 {       
     pinMode(FREQUENCY_READ, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(FREQUENCY_READ), readFrequency, CHANGE);
-     
-    
+    resetMeasurements();
     pinMode(PP_20A, OUTPUT);
     pinMode(PP_13A, OUTPUT);
     pinMode(PP_32A, OUTPUT);
@@ -141,6 +154,8 @@ void setup()
     pinMode(CAR, OUTPUT);
     pinMode(CHARGE, OUTPUT);
     pinMode(CHARGECOOL, OUTPUT);
+    pinMode(CP_ERROR_PIN,OUTPUT);
+    digitalWrite(CP_ERROR_PIN,LOW);
 
     Wire.begin();
     Serial.begin(115200);
@@ -161,45 +176,26 @@ void loop()
     readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
 
 
-    // if( selectPilotMode == 0){
+     currentTimer = millis();
+
+     if(currentTimer - previousTimer >= 100){
+         previousTimer = currentTimer;
+
+        frequencyValue = calculateFrequency(periodMeasurement);
+        pulseWidthValue = calculatePulseWidth(periodMeasurement);
+     }
+
+    Serial.println(digitalRead(FREQUENCY_READ));
+
         
-    //         if (isAnalogButtonPressed(analogButton1, readedButtonValue)){
-    //             selectPilotMode = 1;
-    //             anyButtonPressed = true;
-    //             functionOccuredOnce = true;
-                
-    //         }
-    //         else if (isAnalogButtonPressed(analogButton2, readedButtonValue))
-    //         {   
-    //             anyButtonPressed = true;
-    //             functionOccuredOnce = true;
-    //             selectPilotMode = 2; 
-    //         }
-        
-    // }
-    // if(periodMeasurement[0] - periodMeasurement[2] != 0){
-    // calculations = 1/ (periodMeasurement[2] - periodMeasurement[0]);
-    // }
 
-
-    //calculations = (round(1 / ((periodMeasurement[2]- periodMeasurement[0]) / 1000 ) *1000)) ;
-    //calculations =  (periodMeasurement[1] - periodMeasurement[0]) / (periodMeasurement[2] - periodMeasurement[0]) *100;
-
-
-    //Serial.println(periodMeasurement[5].high_2-periodMeasurement[5].high_1);
-    frequencyValue = calculateFrequency(periodMeasurement);
-    pulseWidthValue = calculatePulseWidth(periodMeasurement);
-
-    Serial.println(frequencyValue);
-
-    if(abs(abs(newFrequencyValue) - abs(frequencyValue)) > 10
-    || abs(abs(newPulseWidthValue) - abs(pulseWidthValue)) > 2){
-        newFrequencyValue = frequencyValue;
-        newPulseWidthValue = pulseWidthValue;
-        displayResults();
-    }
-    //Serial.println(frequencyValue);
-    // Serial.println(pulseWidthValue);
+    if(abs(abs(newFrequencyValue) - abs(frequencyValue)) > 10 
+     || abs(abs(newPulseWidthValue) - abs(pulseWidthValue)) > 0.5){
+         newFrequencyValue = frequencyValue;
+         newPulseWidthValue = pulseWidthValue;
+         displayResults();
+     }
+   
 
     
 
@@ -219,11 +215,18 @@ void loop()
     if (isAnyAnalogButtonPressed()){
         anyButtonPressed = true;
         pressedButtonTime = millis();
+        if(cpErrorOn) cpErrorOn = false;
+        resetCountdown();
+        
     }
     else if (readedButtonValue == 0)
-    {
+    {   
+        if(countdown > 0){
+            countdown = 0;
+            displayResults();
+        }
         anyButtonPressed = false;
-        functionOccuredOnce = false;
+        functionOccuredOnce = false; 
     }
 
     if( selectPilotMode == 1){
@@ -338,6 +341,41 @@ void loop()
             displayResults();
             functionOccuredOnce = true;
         }
+        if(countdownTime - pressedButtonTime > SEK_1  &&  !sekDisplay[0]){
+            countdown = 1;
+            sekDisplay[0] = true;
+            displayResults();
+        }
+        if(countdownTime - pressedButtonTime > SEK_2  &&  !sekDisplay[1]){
+            countdown = 2;
+            sekDisplay[1] = true;
+            displayResults();
+        }
+        if(countdownTime - pressedButtonTime > SEK_3  &&  !sekDisplay[2]){
+            countdown = 3;
+            sekDisplay[2] = true;
+            displayResults();
+        }
+        if(countdownTime - pressedButtonTime > SEK_4  &&  !sekDisplay[3]){
+            countdown = 4;
+            sekDisplay[3] = true;
+            displayResults();
+            
+        }
+        if(countdownTime - pressedButtonTime > SEK_5  &&  !sekDisplay[4]){
+            countdown = 5;
+            sekDisplay[4] = true;
+            displayResults();
+
+        }
+        
+        if (countdownTime - pressedButtonTime > TIME_TO_HOLD_BUTTON_FOR_ERROR  && !cpErrorOn){
+            digitalWrite(CP_ERROR_PIN,HIGH);
+            countdown = 0;
+            cpErrorOn = true;
+            displayResults();
+        } 
+
     }
     else if (isAnalogButtonPressed(analogButton4, readedButtonValue) && anyButtonPressed)
     {
@@ -354,7 +392,9 @@ void loop()
         }
     }
     
-
+    if(!cpErrorOn){
+        digitalWrite(CP_ERROR_PIN, LOW);
+    }
     
 }
 
@@ -369,13 +409,21 @@ void displayResults()
     display.setCursor(64, 0);
     display.println(mapCPValueAsModeName(selectCPMode));
     display.setCursor(0, 18);
+    if(selectCPMode == 0){
+        frequencyValue = 0;
+        pulseWidthValue = 0;
+    }
     display.println("Frequency: " + String(frequencyValue) + " Hz");
     display.setCursor(0, 36);
     display.println("Pulse Width: " + String(pulseWidthValue) + " %");
-     if(frequencyBeyondTheNorm){
-         display.setCursor(0, 52);
-         display.println("Freq beyond the norm");
-     }
+    if(countdown != 0){
+        display.setCursor(64, 52);
+        display.println(String(countdown));
+    }
+    if(cpErrorOn){
+          display.setCursor(0, 52);
+          display.println(F("CP short circut"));
+    }
     display.display();
 
 }
@@ -518,63 +566,71 @@ void startingSelectiveMenu(){
     display.display();
 }
 
+
 void readFrequency(){
-    if(digitalRead(FREQUENCY_READ) == LOW  && !firstRisingDetected){
-        periodMeasurement[m_counter.counter].high_1 = micros();
-        firstRisingDetected = true;
-    }
-    else if(digitalRead(FREQUENCY_READ) == HIGH  && firstRisingDetected){
-        periodMeasurement[m_counter.counter].low_1 = micros();
-    }
-    else if (digitalRead(FREQUENCY_READ) == LOW && firstRisingDetected){
-        periodMeasurement[m_counter.counter].high_2 = micros();
-        firstRisingDetected = false;
-        m_counter.counter++;
-    }
-
-}
-
-float calculateFrequency(PeriodMeasurement periodMeasurement[]){
-    float averagePeriod[8] = {0,0,0,0,0,0};
-    float average = 0;
-    for(int i = 0; i <= 7; i++){
-        averagePeriod[i] = float(periodMeasurement[i].high_2 - periodMeasurement[i].high_1);
-    }
-
-    selectionSort(averagePeriod,8);
-
-    for(int i = 2; i <=5; i++){
-        average += averagePeriod[i];
-    }
-    average = average / 4;
-
-    average = (1 / (average / 1000 )) * 1000;
-
-    return average;
+    periodMeasurement[m_counter.counter][MICROS] = micros();
+    periodMeasurement[m_counter.counter][STATE] = digitalRead(FREQUENCY_READ);
+    m_counter.counter++;
 }
 
 
-
-float calculatePulseWidth(PeriodMeasurement periodMeasurement[]){
-    float averagePulseWidth[8] = {0,0,0,0,0,0};
+float calculateFrequency(unsigned long periodMeasurement[][DATA_COUNT]){
+    float averagePeriod[NUMBER_OF_MEASURMENTS /2] = {0,0,0,0,0,0,0,0};
     float average = 0;
-    for(int i = 0; i<=7; i++){
-        averagePulseWidth[i] = (float(periodMeasurement[i].low_1 - periodMeasurement[i].high_1) ) /
-                                float(periodMeasurement[i].high_2 - periodMeasurement[i].high_1) ;
-    }
+    uint8_t measureCounter = 0;
+    for(uint8_t i = 0; i <= NUMBER_OF_MEASURMENTS - 3; i++){
+        if(periodMeasurement[i][STATE] == HIGH){
+            averagePeriod[measureCounter] = periodMeasurement[i+2][MICROS] - periodMeasurement[i][MICROS];
+            measureCounter++;            
+        } else {
+            continue;
+        }  
+     }
+     selectionSort(averagePeriod, measureCounter);
 
-    selectionSort(averagePulseWidth,8);
+  
+     for(uint8_t i = 1; i <= measureCounter -3 ; i++){
+         average += averagePeriod[i];
+     }
 
-    for(int i = 1; i<=5; i++){
-        average += averagePulseWidth[i];
-    }
+     average = average / (measureCounter - 3);
+     average = (1 / (average / 1000 )) * 1000;
 
-    average = average / 4;
 
-    if( average > 1){
-        average = 1;
-    }
-    return average * 100 ;
+     return average;
+}
+
+float calculatePulseWidth(unsigned long periodMeasurement[][DATA_COUNT]){
+    float averagePulseWidth[NUMBER_OF_MEASURMENTS /2] = {0,0,0,0,0,0,0,0};
+    float average = 0;
+    uint8_t measureCounter = 0;
+    for(uint8_t i = 0; i <= NUMBER_OF_MEASURMENTS - 3; i++){
+        if(periodMeasurement[i][STATE] == HIGH){
+            averagePulseWidth[measureCounter] = float(periodMeasurement[i+1][MICROS] - periodMeasurement[i][MICROS]) /
+                                                float(periodMeasurement[i+2][MICROS] - periodMeasurement[i][MICROS]);
+
+            measureCounter++;            
+        } else {
+            continue;
+        }  
+     }
+
+      selectionSort(averagePulseWidth,measureCounter);
+
+     for(uint8_t i = 2; i<= measureCounter -3 ; i++){
+         average += averagePulseWidth[i];
+         Serial.println(averagePulseWidth[i]);
+     }
+         delay(100);
+   
+        average = average / (measureCounter - 4);
+
+     if( average > 1){
+         average = 1;
+
+     }
+
+    return 99 - ( average * 100 );    
 }
 
 void swap(float* xp, float* yp) 
@@ -603,3 +659,17 @@ void selectionSort(float arr[], uint8_t n)
         swap(&arr[min_idx], &arr[i]); 
     } 
 } 
+
+void resetMeasurements(){
+    for(uint8_t measure=0; measure<= NUMBER_OF_MEASURMENTS -1; measure++){
+        for(uint8_t dataType = 0; dataType <= DATA_COUNT -1; dataType++) {
+            periodMeasurement[measure][dataType] = 0;
+        }
+    }
+}
+
+void resetCountdown(){
+    for(uint8_t i=0; i<=4; i++){
+        sekDisplay[i] = false;
+    }
+}
