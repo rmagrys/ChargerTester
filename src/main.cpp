@@ -7,6 +7,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH1106.h>
 #include <time.h>
+#include <EEPROM.h>
 
 #define OLED_RESET 4
 Adafruit_SH1106 display(OLED_RESET);
@@ -19,23 +20,40 @@ typedef struct {
 }Counter;
 
 
+
+#define CONFIG_VERSION "stp"
+
+#define CONFIG_START 32
+#define NO_STARTUP_CONFIG 0
+#define NO_CABLE_SIMULATING 1
+#define CABLE_SIMULATING 2
+#define TIME_TO_HOLD_BUTTON_FOR_MENU 3100
+
+struct StoreStruct{
+    char version[4];
+    uint8_t pilotMode : 2;
+}pilotVersion = {
+    CONFIG_VERSION,
+    0
+};
+
+
 #define TOLLERANCE 5
 #define BUTTON_1_VALUE 769
 #define BUTTON_2_VALUE 616
 #define BUTTON_3_VALUE 514
 #define BUTTON_4_VALUE 440
 
+#define NO_CABLE_CONNECTION 917                                      //823
 
-#define NO_CABLE_CONNECTION 823                                      //823
+#define CABLE_32A_MIN 305                                            //175             /// dla pilota bez mosfetów 180
+#define CABLE_32A_MAX 486                                            //314                 //310
 
-#define CABLE_32A_MIN 175                                            //175             /// dla pilota bez mosfetów 180
-#define CABLE_32A_MAX 314                                            //314                 //310
+#define CABLE_20A_MIN 486                                          //314                //320
+#define CABLE_20A_MAX 706                                         //532                //530
 
-#define CABLE_20A_MIN 314                                          //314                //320
-#define CABLE_20A_MAX 532                                          //532                //530
-
-#define CABLE_13A_MIN 534                                            //534
-#define CABLE_13A_MAX 685                                           //685
+#define CABLE_13A_MIN 706                                           //534
+#define CABLE_13A_MAX 825                                           //685
 
 #define DELAY_BEFORE_CHANGES 200 
 
@@ -44,7 +62,7 @@ const AnalogButton analogButton2(BUTTON_2_VALUE - TOLLERANCE, BUTTON_1_VALUE + T
 const AnalogButton analogButton3(BUTTON_3_VALUE - TOLLERANCE , BUTTON_3_VALUE + TOLLERANCE);
 const AnalogButton analogButton4(BUTTON_4_VALUE - TOLLERANCE, BUTTON_4_VALUE + TOLLERANCE);
 
-const AnalogButton noCableAnalogInput(NO_CABLE_CONNECTION - TOLLERANCE, NO_CABLE_CONNECTION + TOLLERANCE);
+const AnalogButton noCableAnalogInput(NO_CABLE_CONNECTION - 10, NO_CABLE_CONNECTION + 10);
 const AnalogButton cable32A_AnalogInput(CABLE_32A_MIN, CABLE_32A_MAX);
 const AnalogButton cable20A_AnalogInput(CABLE_20A_MIN, CABLE_20A_MAX);
 const AnalogButton cable13A_AnalogInput(CABLE_13A_MIN, CABLE_13A_MAX);
@@ -57,6 +75,14 @@ boolean isCable_13ADisplayedRecently = false;
 
 boolean timerStarted = true;
 boolean isPPValueDisplayed = false;
+
+#define errorButton1 3
+#define errorButton2 5
+boolean errorButton1Pressed = false;
+boolean errorButton2Pressed = false;
+
+const String PP_DISCONECT_ERROR = "NO_PP";
+const String DIODE_ERROR = "DIODE";
 
 #define CP_PP_MODE_SELECTOR A2
 #define PP_CABLE_VOLTAGE A6
@@ -81,7 +107,9 @@ uint16_t readedPPVaule = 0;
 #define SEK_3 3000
 #define SEK_4 4000
 #define SEK_5 5000
-uint8_t countdown = 0;
+
+#define COUNTDOWN_START 6
+uint8_t countdown = COUNTDOWN_START;
 boolean sekDisplay[5] = {0,0,0,0,0};
 boolean cpErrorOn = false;
 boolean errorSwitch = false;
@@ -99,8 +127,6 @@ uint16_t countdownToDisplay = 0;
 uint8_t selectCPMode = 0;
 uint8_t selectPPMode = 0;
 uint8_t selectPPModeByButton = 0;
-uint8_t selectPilotMode = 1;
-
 
 uint8_t counter = 0;
 float calculations = 0; 
@@ -132,12 +158,15 @@ String mapCPValueAsModeName(uint8_t value);
 String mapPPValueAsModeName(uint8_t value);
 boolean isCableChanged();
 boolean isAnyAnalogButtonPressed();
-void startingSelectiveMenu();
+void displaySelectiveMenu();
 void readFrequency();
 void swap(float* xp, float* yp);
 void selectionSort(float arr[], uint8_t n);
 void resetMeasurements();
 void resetCountdown();
+void menu();
+void loadConfig();
+void saveConfig();
 
 float calculateFrequency(unsigned long periodMeasurement[][DATA_COUNT]);
 float calculatePulseWidth(unsigned long periodMeasurement[][DATA_COUNT]);
@@ -147,15 +176,22 @@ void setup()
     pinMode(FREQUENCY_READ, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(FREQUENCY_READ), readFrequency, CHANGE);
     resetMeasurements();
+
     pinMode(PP_20A, OUTPUT);
     pinMode(PP_13A, OUTPUT);
     pinMode(PP_32A, OUTPUT);
+
+    pinMode(errorButton1, INPUT);
+    pinMode(errorButton2, INPUT);
+    
 
     pinMode(CAR, OUTPUT);
     pinMode(CHARGE, OUTPUT);
     pinMode(CHARGECOOL, OUTPUT);
     pinMode(CP_ERROR_PIN,OUTPUT);
     digitalWrite(CP_ERROR_PIN,LOW);
+
+    loadConfig();
 
     Wire.begin();
     Serial.begin(115200);
@@ -166,51 +202,47 @@ void setup()
     display.setTextSize(3);
     display.setTextColor(WHITE);
     display.setCursor(15, 0);
-    display.println(F("Witaj"));
+    display.println(F("Hello"));
+    if(pilotVersion.pilotMode == NO_CABLE_SIMULATING){
+        display.setTextSize(1);
+        display.setCursor(6, 32);
+        display.println(F("Only CP simulate"));
+    }
+    else if(pilotVersion.pilotMode == CABLE_SIMULATING){
+        display.setTextSize(1);
+        display.setCursor(6, 32);
+        display.println(F("PP and CP simulate"));
+    }
     display.display();
+    
     delay(1500);
 }
 
 void loop()
 {   
-    readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
 
-
-     currentTimer = millis();
-
-     if(currentTimer - previousTimer >= 100){
-         previousTimer = currentTimer;
-
-        frequencyValue = calculateFrequency(periodMeasurement);
-        pulseWidthValue = calculatePulseWidth(periodMeasurement);
-     }
-
-    Serial.println(digitalRead(FREQUENCY_READ));
-
-        
-
-    if(abs(abs(newFrequencyValue) - abs(frequencyValue)) > 10 
-     || abs(abs(newPulseWidthValue) - abs(pulseWidthValue)) > 0.5){
-         newFrequencyValue = frequencyValue;
-         newPulseWidthValue = pulseWidthValue;
-         displayResults();
-     }
    
-
-    
-
-    //  if( (frequencyValue < 1050.0F || frequencyValue > 950.0F) && frequencyBeyondTheNorm){
-    //      frequencyBeyondTheNorm = false;
-    //      displayResults();
-    //  }
-    //  else if((frequencyValue > 1050.0F || frequencyValue < 950.0F) && !frequencyBeyondTheNorm) {
-    //      frequencyBeyondTheNorm = true;
-    //      displayResults();
-    //  }
+ 
+//////////////////////////////////////////////////// VERSION CHANGE SECTION //////////////////////////////////////////////////////////
+   
+    if (pilotVersion.pilotMode == 0)
+    {
+        displaySelectiveMenu();
+        menu();
+        displayResults();
+    }
 
     readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
     readedPPVaule = analogRead(PP_CABLE_VOLTAGE);
+    
+   // Serial.println(pilotVersion.pilotMode);
+    //Serial.println(pilotVersion.version);
 
+
+
+
+    
+/////////////////////////////////////////////////// BUTTON SECTION ///////////////////////////////////////////////////////////////
 
     if (isAnyAnalogButtonPressed()){
         anyButtonPressed = true;
@@ -222,114 +254,72 @@ void loop()
     else if (readedButtonValue == 0)
     {   
         if(countdown > 0){
-            countdown = 0;
+            countdown = COUNTDOWN_START;
             displayResults();
         }
         anyButtonPressed = false;
         functionOccuredOnce = false; 
     }
 
-    if( selectPilotMode == 1){
-    if(isCableChanged() && !timerStarted){
-        timeReadedAfterChange = millis();
-        timerStarted = true;
-    }
- 
-
-    if (isDefinedAnalogValuePresent(noCableAnalogInput, readedPPVaule) && !isNoCableDisplayedRecently) {
-        countdownToDisplay = millis();
-        if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
-            isNoCableDisplayedRecently = true;
-            isCable_13ADisplayedRecently = false;
-            isCable_20AisplayedRecently = false;
-            isCable_32ADisplayedRecently = false;
-            selectPPMode = 0;
-            selectCPMode = 0;
-            Serial.println("No Cable");
-
-            displayResults();
-            timerStarted = false;
-        }
-    }
-    else if (isDefinedAnalogValuePresent(cable32A_AnalogInput, readedPPVaule) && !isCable_32ADisplayedRecently) {
-        countdownToDisplay = millis();
-        if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
-            isCable_32ADisplayedRecently = true;
-            isNoCableDisplayedRecently = false;
-            isCable_13ADisplayedRecently = false;
-            isCable_20AisplayedRecently = false;
-            selectPPMode = 1;
-            Serial.println("32 A");
-        
-            displayResults();
-            timerStarted = false;
-        }
-    }
-    else if (isDefinedAnalogValuePresent(cable20A_AnalogInput, readedPPVaule) && !isCable_20AisplayedRecently) {
-        countdownToDisplay = millis();
-        if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
-            isCable_20AisplayedRecently = true;
-            isNoCableDisplayedRecently = false;
-            isCable_13ADisplayedRecently = false;
-            isCable_32ADisplayedRecently = false;
-            Serial.println("20 A");
-            selectPPMode = 2;
-            displayResults();
-            timerStarted = false;
-       }
-    }
-    else if (isDefinedAnalogValuePresent(cable13A_AnalogInput, readedPPVaule) && !isCable_13ADisplayedRecently) {
-        countdownToDisplay = millis();
-        if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
-            isCable_13ADisplayedRecently = true;
-            isNoCableDisplayedRecently = false;
-            isCable_20AisplayedRecently = false;
-            isCable_32ADisplayedRecently = false;
-            Serial.println("13 A");
-            selectPPMode = 3;
-            displayResults();
-            timerStarted = false;
-        }
-    }
-    }
-    else if(selectPilotMode == 2){
-
-    
     if (isAnalogButtonPressed(analogButton1, readedButtonValue) && anyButtonPressed)
-    {
+    {   
         countdownTime = millis();
-        if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce)
-        {
-        if (selectPPMode > 0)
-        {
-            selectPPMode--;
+
+        if(pilotVersion.pilotMode == CABLE_SIMULATING){
+            
+            if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce){
+                if (selectPPMode > 0){
+                    selectPPMode--;
+                }
+                if (selectPPMode == 0){
+                    selectCPMode = 0;
+                }
+                setOutputValues();
+                displayResults();
+                functionOccuredOnce = true;
+            }
         }
-        if (selectPPMode == 0)
-        {
-            selectCPMode = 0;
+        if(countdownTime - pressedButtonTime > SEK_1  &&  !sekDisplay[0]){
+            countdown = 3;
+            sekDisplay[0] = true;
+            displayResults();
         }
-        setOutputValues();
-        displayResults();
-        functionOccuredOnce = true;
+        if(countdownTime - pressedButtonTime > SEK_2  &&  !sekDisplay[1]){
+            countdown = 2;
+            sekDisplay[1] = true;
+            displayResults();
         }
+        if(countdownTime - pressedButtonTime > SEK_3  &&  !sekDisplay[2]){
+            countdown = 1;
+            sekDisplay[2] = true;
+            displayResults();
+        }
+        if (countdownTime - pressedButtonTime > TIME_TO_HOLD_BUTTON_FOR_MENU){
+            countdown = COUNTDOWN_START;
+            functionOccuredOnce = true;
+            pilotVersion.pilotMode = 0;
+            
+        } 
     }
     else if (isAnalogButtonPressed(analogButton2, readedButtonValue) && anyButtonPressed)
-    {
+    {   
         countdownTime = millis();
-        if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce)
-        {
-        if(selectPPMode < 4){
-        selectPPMode++;
-        }
-        displayResults();
-        setOutputValues();
-        functionOccuredOnce = true;
+        if(pilotVersion.pilotMode == CABLE_SIMULATING){
+            
+            if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce){
+                if(selectPPMode < 3){
+                selectPPMode++;
+            }
+            displayResults();
+            setOutputValues();
+            functionOccuredOnce = true;
+            }
         }
     }
-    }
+    
 
     if (isAnalogButtonPressed(analogButton3, readedButtonValue) && anyButtonPressed)
-    {
+    {   
         countdownTime = millis();
         if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce)
         {
@@ -342,12 +332,12 @@ void loop()
             functionOccuredOnce = true;
         }
         if(countdownTime - pressedButtonTime > SEK_1  &&  !sekDisplay[0]){
-            countdown = 1;
+            countdown = 5;
             sekDisplay[0] = true;
             displayResults();
         }
         if(countdownTime - pressedButtonTime > SEK_2  &&  !sekDisplay[1]){
-            countdown = 2;
+            countdown = 4;
             sekDisplay[1] = true;
             displayResults();
         }
@@ -357,13 +347,13 @@ void loop()
             displayResults();
         }
         if(countdownTime - pressedButtonTime > SEK_4  &&  !sekDisplay[3]){
-            countdown = 4;
+            countdown = 2;
             sekDisplay[3] = true;
             displayResults();
             
         }
         if(countdownTime - pressedButtonTime > SEK_5  &&  !sekDisplay[4]){
-            countdown = 5;
+            countdown = 1;
             sekDisplay[4] = true;
             displayResults();
 
@@ -371,7 +361,7 @@ void loop()
         
         if (countdownTime - pressedButtonTime > TIME_TO_HOLD_BUTTON_FOR_ERROR  && !cpErrorOn){
             digitalWrite(CP_ERROR_PIN,HIGH);
-            countdown = 0;
+            countdown = COUNTDOWN_START;
             cpErrorOn = true;
             displayResults();
         } 
@@ -391,10 +381,126 @@ void loop()
             functionOccuredOnce = true;
         }
     }
+
+ ////////////////////////////////////////////// CABLE SECTION   //////////////////////////////////////////////////////////  
+    if(pilotVersion.pilotMode == NO_CABLE_SIMULATING){
+        if(isCableChanged() && !timerStarted){
+            timeReadedAfterChange = millis();
+            timerStarted = true;
+        }
     
+        if (isDefinedAnalogValuePresent(noCableAnalogInput, readedPPVaule) && !isNoCableDisplayedRecently) {
+            countdownToDisplay = millis();
+            if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
+                isNoCableDisplayedRecently = true;
+                isCable_13ADisplayedRecently = false;
+                isCable_20AisplayedRecently = false;
+                isCable_32ADisplayedRecently = false;
+                selectPPMode = 0;
+                selectCPMode = 0;
+                Serial.println("No Cable");
+                
+                displayResults();
+                timerStarted = false;
+            }
+        }
+        else if (isDefinedAnalogValuePresent(cable32A_AnalogInput, readedPPVaule) && !isCable_32ADisplayedRecently) {
+            countdownToDisplay = millis();
+            if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
+                isCable_32ADisplayedRecently = true;
+                isNoCableDisplayedRecently = false;
+                isCable_13ADisplayedRecently = false;
+                isCable_20AisplayedRecently = false;
+                selectPPMode = 1;
+                Serial.println("32 A");
+            
+                displayResults();
+                timerStarted = false;
+            }
+        }
+        else if (isDefinedAnalogValuePresent(cable20A_AnalogInput, readedPPVaule) && !isCable_20AisplayedRecently) {
+            countdownToDisplay = millis();
+            if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
+                isCable_20AisplayedRecently = true;
+                isNoCableDisplayedRecently = false;
+                isCable_13ADisplayedRecently = false;
+                isCable_32ADisplayedRecently = false;
+                Serial.println("20 A");
+                selectPPMode = 2;
+                displayResults();
+                timerStarted = false;
+            }
+        }
+        else if (isDefinedAnalogValuePresent(cable13A_AnalogInput, readedPPVaule) && !isCable_13ADisplayedRecently) {
+            countdownToDisplay = millis();
+            if (countdownToDisplay - timeReadedAfterChange > DELAY_BEFORE_CHANGES) {
+                isCable_13ADisplayedRecently = true;
+                isNoCableDisplayedRecently = false;
+                isCable_20AisplayedRecently = false;
+                isCable_32ADisplayedRecently = false;
+                Serial.println("13 A");
+                selectPPMode = 3;
+                displayResults();
+                timerStarted = false;
+            }
+        }
+    }
+/////////////////////////////////////////////   ERROR BUTTON SECTION  /////////////////////////////////////////////////////
+
+if (digitalRead(errorButton1) == HIGH && !errorButton1Pressed)
+  {
+    errorButton1Pressed = true;
+    displayResults();
+  }
+  else if (digitalRead(errorButton1) == LOW && errorButton1Pressed)
+  {
+    errorButton1Pressed = false;
+    displayResults();
+  }
+
+  if (digitalRead(errorButton2) == HIGH && !errorButton2Pressed)
+  {
+    errorButton2Pressed = true;
+    displayResults();
+  }
+  else if (digitalRead(errorButton2) == LOW && errorButton2Pressed)
+  {
+    errorButton2Pressed = false;
+    displayResults();
+  }
+
+/////////////////////////////////////////////   FREQUENCY SECTION   ///////////////////////////////////////////////////////////
+
+     currentTimer = millis();
+
+     if(currentTimer - previousTimer >= 100){
+         previousTimer = currentTimer;
+
+        frequencyValue = calculateFrequency(periodMeasurement);
+        pulseWidthValue = calculatePulseWidth(periodMeasurement);
+     }
+    
+
+    if(abs(abs(newFrequencyValue) - abs(frequencyValue)) > 10 
+     || abs(abs(newPulseWidthValue) - abs(pulseWidthValue)) > 0.5){
+         newFrequencyValue = frequencyValue;
+         newPulseWidthValue = pulseWidthValue;
+         displayResults();
+     }
+   
+
     if(!cpErrorOn){
         digitalWrite(CP_ERROR_PIN, LOW);
     }
+
+    //  if( (frequencyValue < 1050.0F || frequencyValue > 950.0F) && frequencyBeyondTheNorm){
+    //      frequencyBeyondTheNorm = false;
+    //      displayResults();
+    //  }
+    //  else if((frequencyValue > 1050.0F || frequencyValue < 950.0F) && !frequencyBeyondTheNorm) {
+    //      frequencyBeyondTheNorm = true;
+    //      displayResults();
+    //  }
     
 }
 
@@ -408,21 +514,37 @@ void displayResults()
     display.println(mapPPValueAsModeName(selectPPMode));
     display.setCursor(64, 0);
     display.println(mapCPValueAsModeName(selectCPMode));
-    display.setCursor(0, 18);
+    
     if(selectCPMode == 0){
         frequencyValue = 0;
         pulseWidthValue = 0;
     }
-    display.println("Frequency: " + String(frequencyValue) + " Hz");
-    display.setCursor(0, 36);
-    display.println("Pulse Width: " + String(pulseWidthValue) + " %");
-    if(countdown != 0){
-        display.setCursor(64, 52);
+    display.setCursor(0, 13);
+    display.println(F("Frequency: "));
+    display.setCursor(65, 13);
+    display.println(String(frequencyValue) + "Hz");
+    display.setCursor(0, 23);
+    display.println(F("Pulse Width: "));
+    display.setCursor(78, 23);
+    display.println(String(pulseWidthValue) + "%");
+
+    if(countdown != COUNTDOWN_START){
+        display.setCursor(120, 56);
         display.println(String(countdown));
     }
     if(cpErrorOn){
-          display.setCursor(0, 52);
-          display.println(F("CP short circut"));
+          display.setCursor(0, 38);
+          display.println(F("E_CP_SHORT"));
+    }
+    if (errorButton1Pressed)
+    {
+      display.setCursor(0, 47);
+      display.println("E_" + PP_DISCONECT_ERROR);
+    }
+    if (errorButton2Pressed)
+    {
+      display.setCursor(0, 56);
+      display.println("E_"  + DIODE_ERROR );
     }
     display.display();
 
@@ -547,7 +669,7 @@ boolean isAnyAnalogButtonPressed(){
 
 }
 
-void startingSelectiveMenu(){
+void displaySelectiveMenu(){
 
     
     display.clearDisplay();
@@ -558,11 +680,11 @@ void startingSelectiveMenu(){
     display.setCursor(0,10);
     display.println(F("Button 1"));
     display.setCursor(4,18);
-    display.println("You have PP cable");
+    display.println(F("Only CP Simulate"));
     display.setCursor(0,30);
-    display.println("Button 2");
+    display.println(F("Button 2"));
     display.setCursor(4,38);
-    display.println("Simulate PP cable");
+    display.println(F("PP and CP Simulate"));
     display.display();
 }
 
@@ -616,13 +738,11 @@ float calculatePulseWidth(unsigned long periodMeasurement[][DATA_COUNT]){
      }
 
       selectionSort(averagePulseWidth,measureCounter);
-
-     for(uint8_t i = 2; i<= measureCounter -3 ; i++){
+    
+          for(uint8_t i = 2; i <= measureCounter -3 ; i++){
          average += averagePulseWidth[i];
-         Serial.println(averagePulseWidth[i]);
      }
-         delay(100);
-   
+
         average = average / (measureCounter - 4);
 
      if( average > 1){
@@ -673,3 +793,55 @@ void resetCountdown(){
         sekDisplay[i] = false;
     }
 }
+
+void loadConfig() {
+
+  if (EEPROM.read(CONFIG_START + 0) == CONFIG_VERSION[0] &&
+      EEPROM.read(CONFIG_START + 1) == CONFIG_VERSION[1] &&
+      EEPROM.read(CONFIG_START + 2) == CONFIG_VERSION[2])
+    for (unsigned int t=0; t<sizeof(pilotVersion); t++)
+      *((char*)&pilotVersion + t) = EEPROM.read(CONFIG_START + t);
+}
+
+void saveConfig() {
+  for (unsigned int t=0; t<sizeof(pilotVersion); t++)
+    EEPROM.write(CONFIG_START + t, *((char*)&pilotVersion + t));
+}
+
+void menu(){
+    for(;;){
+        if (isAnyAnalogButtonPressed() && !anyButtonPressed){
+            anyButtonPressed = true;
+            pressedButtonTime = millis();
+        }
+         else if (readedButtonValue == 0){
+            anyButtonPressed = false;
+            functionOccuredOnce = false; 
+        }
+
+        readedButtonValue = analogRead(CP_PP_MODE_SELECTOR);
+        if (isAnalogButtonPressed(analogButton1, readedButtonValue) && anyButtonPressed){
+            countdownTime = millis();
+            if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce){
+                pilotVersion.pilotMode = NO_CABLE_SIMULATING;
+                anyButtonPressed = true;
+                functionOccuredOnce = true;
+                saveConfig();
+                return;
+            }
+        }
+    
+        if (isAnalogButtonPressed(analogButton2, readedButtonValue) && anyButtonPressed){
+            countdownTime = millis();
+            if (countdownTime - pressedButtonTime > timeToHoldButton && !functionOccuredOnce){
+                pilotVersion.pilotMode = CABLE_SIMULATING;
+                anyButtonPressed = true;
+                functionOccuredOnce = true;
+                saveConfig();
+                return;
+            }
+        }
+
+    }
+}
+
